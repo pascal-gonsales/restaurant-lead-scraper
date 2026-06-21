@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Syntax, tests, smoke
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest
+
+      - name: Syntax check (py_compile)
+        run: python -m py_compile workflow-generator.py
+
+      - name: Run tests
+        run: python -m pytest tests/ -v
+
+      - name: Smoke run the generator
+        # Generator must emit a valid JSON workflow with exit code 0.
+        # The output file is .gitignore'd; we only verify it runs clean.
+        run: python workflow-generator.py
