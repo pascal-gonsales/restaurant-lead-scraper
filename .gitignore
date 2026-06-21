@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Generated workflow files (produce them with the generator)
+generated-workflow-*.json
+
+# Environment + secrets
+.env
+.env.*
+!.env.example
+secrets/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*~
+~$*
+
+# Node (if anyone bolts on tooling)
+node_modules/
+package-lock.json
+yarn.lock
+
+# CI / coverage
+.coverage
+htmlcov/
+coverage.xml
+*.coverage
