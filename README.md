@@ -114,7 +114,10 @@ API key, target Sheet id, and a Google Sheets OAuth2 credential.
 - Every value in this repo is synthetic. `examples/sample-output.csv` uses
   obviously-fictional venue names, `555-01xx` phones, and `.fictional-test`
   email domains. There are no real API keys, Sheet ids, or customer data
-  anywhere in the repo, and a CI test asserts only placeholders are present.
+  anywhere in the repo. A CI test (`tests/test_canonical_workflow.py`) checks
+  the canonical `scraper-workflow.json` specifically: it asserts the credential
+  fields hold only the placeholder strings and contain no live Google API key
+  (no `AIza` prefix). It does not scan every file in the repo.
 - No lint or type checker is wired in (no `ruff`, no `mypy`), and CI runs a
   single Python version (3.11). The code targets Python 3.11+.
 
