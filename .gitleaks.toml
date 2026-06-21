@@ -1,0 +1,10 @@
+title = "gitleaks config"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "local-home-path"
+description = "Absolute local home directory path"
+regex = '''/Users/[A-Za-z0-9._-]+/'''
+tags = ["pii", "path"]

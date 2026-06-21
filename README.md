@@ -128,6 +128,10 @@ API key, target Sheet id, and a Google Sheets OAuth2 credential.
 - No lint or type checker is wired in (no `ruff`, no `mypy`), and CI runs a
   single Python version (3.11). The code targets Python 3.11+.
 
+## Security and development
+
+This repository was built clean-room: it contains only synthetic demo data and no real client, venue, or financial information. Two gates keep it that way. A local pre-commit hook blocks any commit that contains a private real-data token, and a CI workflow (`.github/workflows/secret-scan.yml`) runs gitleaks on every push and pull request and fails on any secret or credential finding.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
