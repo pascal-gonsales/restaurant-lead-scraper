@@ -1,0 +1,533 @@
+{
+  "name": "Restaurant Lead Scraper v2",
+  "nodes": [
+    {
+      "parameters": {},
+      "name": "Start",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "scrape-restaurants-v2",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        200,
+        600
+      ],
+      "webhookId": "scrape-v2-wh"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Configuration \u2014 reads webhook query/params, applies defaults.\nconst incoming = $json.query || $json.params || {};\n\nconst city = incoming.city || 'Demo City';\nconst searchQueries = (incoming.searchQueries || 'restaurant,resto bar,traiteur')\n  .split(',')\n  .map(q => q.trim())\n  .filter(q => q.length > 0);\n\nconst minReviews = parseInt(incoming.minReviews, 10) || 50;\nconst minRating = parseFloat(incoming.minRating) || 3.5;\nconst maxRating = parseFloat(incoming.maxRating) || 4.7;\nconst minPriceLevel = parseInt(incoming.minPriceLevel, 10) || 1;\n\nconst chainBlacklist = [\n  \"mcdonald\",\n  \"mcdo\",\n  \"burger king\",\n  \"kfc\",\n  \"kentucky\",\n  \"subway\",\n  \"pizza hut\",\n  \"domino\",\n  \"quick\",\n  \"five guys\",\n  \"paul\",\n  \"starbucks\",\n  \"kebab factory\",\n  \"class croute\",\n  \"brioche doree\",\n  \"la mie caline\",\n  \"flunch\",\n  \"buffalo grill\",\n  \"hippopotamus\",\n  \"courtepaille\",\n  \"del arte\",\n  \"pizza pai\",\n  \"la pataterie\",\n  \"popeyes\",\n  \"taco bell\",\n  \"wendy\",\n  \"dunkin\",\n  \"krispy kreme\",\n  \"pret a manger\",\n  \"tim hortons\",\n  \"a&w\",\n  \"harvey\",\n  \"st-hubert rotisserie\",\n  \"baton rouge\",\n  \"scores\",\n  \"pacini\",\n  \"mikes\",\n  \"pizza pizza\",\n  \"pizza nova\",\n  \"thai express\",\n  \"manchu wok\",\n  \"cultures\",\n  \"extreme pita\",\n  \"sushi daily\",\n  \"panda express\",\n  \"chipotle\",\n  \"shake shack\",\n  \"nandos\",\n  \"nando\",\n  \"la cage\",\n  \"cora\",\n  \"eggsquis\"\n];\n\nconst apiKey = \"YOUR_GOOGLE_PLACES_API_KEY_HERE\";\n\nreturn [{ json: {\n  city, searchQueries, minReviews, minRating, maxRating, minPriceLevel, chainBlacklist, apiKey,\n} }];\n"
+      },
+      "name": "Configuration",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Generate Search URLs \u2014 one Places Text Search URL per query.\nconst config = $input.first().json;\nreturn config.searchQueries.map(searchQuery => {\n  const q = encodeURIComponent(searchQuery + ' in ' + config.city);\n  const searchUrl =\n    'https://maps.googleapis.com/maps/api/place/textsearch/json' +\n    '?query=' + q + '&type=restaurant&key=' + config.apiKey;\n  return { json: { searchUrl, searchQuery, city: config.city, config } };\n});\n"
+      },
+      "name": "Generate Search URLs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.searchUrl }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 2500
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "name": "Search Page 1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        940,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract Page 1 \u2014 normalize results, collect next_page_token.\nconst items = $input.all();\nconst allPlaces = [];\nconst page2Urls = [];\nlet config = {};\nfor (const item of items) {\n  const data = item.json.data || item.json;\n  config = item.json.config || config;\n  for (const r of (data.results || [])) {\n    allPlaces.push({\n      place_id: r.place_id,\n      name: r.name,\n      address: r.formatted_address,\n      rating: r.rating,\n      reviews: r.user_ratings_total,\n      price_level: r.price_level,\n      types: r.types || [],\n      business_status: r.business_status,\n      searchQuery: item.json.searchQuery,\n    });\n  }\n  if (data.next_page_token) {\n    page2Urls.push(\n      'https://maps.googleapis.com/maps/api/place/textsearch/json' +\n      '?pagetoken=' + data.next_page_token + '&key=' + config.apiKey\n    );\n  }\n}\nreturn [{ json: { allPlaces, page2Urls, config } }];\n"
+      },
+      "name": "Extract Page 1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1160,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-page-2",
+              "leftValue": "={{ $json.page2Urls.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Has Page 2?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1380,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 3,
+        "unit": "seconds"
+      },
+      "name": "Wait for Page 2",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1600,
+        400
+      ],
+      "webhookId": "wait-page-2-wh"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prep Page 2 URLs \u2014 one item per page-2 URL, carrying state forward.\nconst input = $input.first().json;\nreturn (input.page2Urls || []).map(url => ({\n  json: { url, previousPlaces: input.allPlaces, config: input.config }\n}));\n"
+      },
+      "name": "Prep Page 2 URLs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1820,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 2500
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "name": "Search Page 2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2040,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge Pages \u2014 parse page-2 results, concat with previous places.\nconst items = $input.all();\nlet previousPlaces = [];\nlet config = {};\nconst newPlaces = [];\nfor (const item of items) {\n  previousPlaces = item.json.previousPlaces || previousPlaces;\n  config = item.json.config || config;\n  const data = item.json.data || item.json;\n  for (const r of (data.results || [])) {\n    newPlaces.push({\n      place_id: r.place_id,\n      name: r.name,\n      address: r.formatted_address,\n      rating: r.rating,\n      reviews: r.user_ratings_total,\n      price_level: r.price_level,\n      types: r.types || [],\n      business_status: r.business_status,\n    });\n  }\n}\nreturn [{ json: { allPlaces: previousPlaces.concat(newPlaces), config } }];\n"
+      },
+      "name": "Merge Pages",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2260,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Quality Filter + Score \u2014 dedup, hard filters, score, tier. Sort desc.\nconst input = $input.first().json;\nconst allPlaces = input.allPlaces || [];\nconst config = input.config || {};\n\nconst minReviews = config.minReviews || 50;\nconst minRating = config.minRating || 3.5;\nconst maxRating = config.maxRating || 4.7;\nconst chainBlacklist = config.chainBlacklist || [\"mcdonald\", \"mcdo\", \"burger king\", \"kfc\", \"kentucky\", \"subway\", \"pizza hut\", \"domino\", \"quick\", \"five guys\", \"paul\", \"starbucks\", \"kebab factory\", \"class croute\", \"brioche doree\", \"la mie caline\", \"flunch\", \"buffalo grill\", \"hippopotamus\", \"courtepaille\", \"del arte\", \"pizza pai\", \"la pataterie\", \"popeyes\", \"taco bell\", \"wendy\", \"dunkin\", \"krispy kreme\", \"pret a manger\", \"tim hortons\", \"a&w\", \"harvey\", \"st-hubert rotisserie\", \"baton rouge\", \"scores\", \"pacini\", \"mikes\", \"pizza pizza\", \"pizza nova\", \"thai express\", \"manchu wok\", \"cultures\", \"extreme pita\", \"sushi daily\", \"panda express\", \"chipotle\", \"shake shack\", \"nandos\", \"nando\", \"la cage\", \"cora\", \"eggsquis\"];\nconst multiServiceTypes = [\"bar\", \"night_club\", \"meal_delivery\", \"meal_takeaway\"];\n\nconst seen = new Set();\nconst scored = [];\n\nfor (const place of allPlaces) {\n  // 1. Dedup by place_id.\n  if (seen.has(place.place_id)) continue;\n  seen.add(place.place_id);\n\n  // 2. Chain blacklist (substring, case-insensitive).\n  const lowName = (place.name || '').toLowerCase();\n  if (chainBlacklist.some(c => lowName.includes(c))) continue;\n\n  // 3. Must be operational if status is present.\n  if (place.business_status && place.business_status !== 'OPERATIONAL') continue;\n\n  // 4. Minimum review volume.\n  const reviews = place.reviews || 0;\n  if (reviews < minReviews) continue;\n\n  // 5. Rating window (note: wider than the sweet-spot scoring band).\n  const rating = place.rating || 0;\n  if (rating < minRating || rating > maxRating) continue;\n\n  // ---- score ----\n  let score = 0;\n  const breakdown = [];\n\n    if (reviews >= 500) { score += 4; breakdown.push('reviews_500+'); }\n    else if (reviews >= 300) { score += 3; breakdown.push('reviews_300+'); }\n    else if (reviews >= 150) { score += 2; breakdown.push('reviews_150+'); }\n    else { score += 1; breakdown.push('reviews_50+'); }\n\n    if (rating >= 3.8 && rating <= 4.5) { score += 3; breakdown.push('rating_sweetspot'); }\n    else if (rating < 3.8) { score += 1; breakdown.push('rating_struggling'); }\n    else { score += 1; breakdown.push('rating_high'); }\n\n    const priceLevel = place.price_level || 0;\n    if (priceLevel >= 2) { score += 2; breakdown.push('price_$$+'); }\n    else if (priceLevel === 1) { score += 1; breakdown.push('price_$'); }\n\n    const types = (place.types || []).map(t => String(t).toLowerCase());\n    if (types.some(t => multiServiceTypes.includes(t))) { score += 1; breakdown.push('multi_service'); }\n\n  const tier = score >= 8 ? 'HOT' : score >= 5 ? 'WARM' : 'COOL';\n\n  scored.push({ ...place, score, breakdown, tier });\n}\n\nscored.sort((a, b) => b.score - a.score);\nreturn scored.map(s => ({ json: s }));\n"
+      },
+      "name": "Quality Filter + Score",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2500,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://maps.googleapis.com/maps/api/place/details/json?place_id={{ $json.place_id }}&fields=formatted_phone_number,website,opening_hours,price_level,url&key=YOUR_GOOGLE_PLACES_API_KEY_HERE",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 5,
+              "batchInterval": 1000
+            }
+          },
+          "timeout": 10000
+        }
+      },
+      "name": "Get Details",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2720,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Combine Details \u2014 zip Place Details with scored items by index.\nconst scored = $('Quality Filter + Score').all();\nconst details = $input.all();\nconst out = [];\nfor (let i = 0; i < scored.length; i++) {\n  const base = scored[i].json;\n  const d = (details[i] && (details[i].json.result || details[i].json)) || {};\n  const phone = d.formatted_phone_number || '';\n  const website = d.website || '';\n  let fetchUrl = website ? website.replace(/\\/$/, '').split('?')[0] : 'https://example.com';\n  out.push({ json: {\n    ...base,\n    phone,\n    website,\n    fetchUrl,\n    googleMapsUrl: d.url || '',\n    hasWebsite: Boolean(website),\n  } });\n}\nreturn out;\n"
+      },
+      "name": "Combine Details",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2940,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.fetchUrl }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 3,
+              "batchInterval": 1500
+            }
+          },
+          "timeout": 8000,
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "maxRedirects": 3
+            }
+          }
+        }
+      },
+      "name": "Fetch Homepage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3160,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract Emails \u2014 regex, junk filter, dedup, prioritize.\nconst item = $json;\nconst html = item.body || item.data || '';\nconst info = item;\n\nconst junkSubstrings = [\"example\", \"domain.com\", \"wixpress\", \"sentry\", \"cloudflare\", \"googleapis\", \"schema.org\", \"wordpress\", \"gravatar\", \"w3.org\", \"noreply\", \"no-reply\", \"webmaster\", \"support@\"];\nconst junkExtensions = [\".png\", \".jpg\", \".svg\", \".js\", \".css\", \".gif\", \".webp\"];\nconst genericPrefixes = [\"info@\", \"contact@\", \"reservation\", \"booking\", \"admin@\", \"hello@\"];\n\nlet email = '';\nlet allEmails = [];\n\nif (html.length > 100 && info.hasWebsite) {\n  const regex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}/gi;\n  const matches = html.match(regex) || [];\n\n  const cleaned = [];\n  const seen = new Set();\n  for (const raw of matches) {\n    const low = raw.toLowerCase();\n    if (junkSubstrings.some(s => low.includes(s))) continue;\n    if (junkExtensions.some(ext => low.endsWith(ext))) continue;\n    if (seen.has(low)) continue;\n    seen.add(low);\n    cleaned.push(raw);\n  }\n  allEmails = cleaned;\n\n  const personal = cleaned.find(e => !genericPrefixes.some(p => e.toLowerCase().startsWith(p)));\n  const generic = cleaned.find(e => e.toLowerCase().startsWith('info@') || e.toLowerCase().startsWith('contact@'));\n  email = personal || generic || cleaned[0] || '';\n}\n\nlet emailSource;\nif (email) emailSource = 'homepage';\nelse if (info.hasWebsite) emailSource = 'not_found';\nelse emailSource = 'no_website';\n\nreturn [{ json: { ...item, email, emailSource, allEmails } }];\n"
+      },
+      "name": "Extract Emails",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3380,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Multi-Location + Format \u2014 detect multi-unit, apply +3, final tier, map output.\nconst items = $input.all();\nconst genericTypes = [\"restaurant\", \"food\", \"point_of_interest\", \"establishment\", \"store\"];\n\nfunction normalize(name) {\n  let n = (name || '').toLowerCase();\n  n = n.replace(/\\b(restaurant|resto|bar|grill|cafe|caf\\u00e9|bistro|brasserie|kitchen|cuisine|lounge|pub|tavern|traiteur)\\b/g, ' ');\n  n = n.replace(/#\\d+|no\\.? \\d+|\\d+e?|succursale/g, ' ');\n  n = n.replace(/[^a-z0-9]/g, '');\n  n = n.replace(/\\s+/g, ' ').trim();\n  return n;\n}\n\nconst counts = {};\nfor (const item of items) {\n  const key = normalize(item.json.name);\n  if (key.length < 3) continue;\n  counts[key] = (counts[key] || 0) + 1;\n}\n\nconst today = new Date().toISOString().slice(0, 10);\nconst out = [];\nfor (const item of items) {\n  const j = item.json;\n  const key = normalize(j.name);\n  const isMultiUnit = key.length >= 3 && counts[key] >= 2;\n  const finalScore = j.score + (isMultiUnit ? 3 : 0);\n  const breakdown = (j.breakdown || []).slice();\n  if (isMultiUnit) breakdown.push('multi_unit_+3');\n  const finalTier = finalScore >= 8 ? 'HOT' : finalScore >= 5 ? 'WARM' : 'COOL';\n\n  const cuisine = (j.types || [])\n    .filter(t => !genericTypes.includes(t))\n    .map(t => String(t).replace(/_/g, ' '))\n    .join(', ');\n\n  out.push({ json: {\n    Name: j.name,\n    Address: j.address,\n    Phone: j.phone || '',\n    Email: j.email || '',\n    EmailSource: j.emailSource,\n    Website: j.website || '',\n    GoogleMaps: j.googleMapsUrl || '',\n    Rating: j.rating,\n    ReviewCount: j.reviews,\n    PriceLevel: j.price_level,\n    Cuisine: cuisine,\n    Score: finalScore,\n    Tier: finalTier,\n    MultiUnit: isMultiUnit ? 'TRUE' : 'FALSE',\n    ScoreDetail: breakdown.join(', '),\n    DateScraped: today,\n  } });\n}\nreturn out;\n"
+      },
+      "name": "Multi-Location + Format",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3600,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID_HERE",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "id"
+        },
+        "options": {
+          "dataLocationOnSheet": {
+            "values": {}
+          }
+        },
+        "dataMode": "autoMapInputData"
+      },
+      "name": "Save to Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        3820,
+        500
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "Google Sheets account (placeholder)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Summary Report \u2014 aggregate run stats into a success object.\nconst items = $input.all();\nconst total = items.length;\nconst withEmail = items.filter(i => i.json.Email).length;\nconst withPhone = items.filter(i => i.json.Phone).length;\nconst multiUnit = items.filter(i => i.json.MultiUnit === 'TRUE').length;\nconst tiers = { HOT: 0, WARM: 0, COOL: 0 };\nconst emailSources = {};\nfor (const i of items) {\n  tiers[i.json.Tier] = (tiers[i.json.Tier] || 0) + 1;\n  const s = i.json.EmailSource || 'unknown';\n  emailSources[s] = (emailSources[s] || 0) + 1;\n}\nconst emailRate = total ? Math.round((withEmail / total) * 100) : 0;\nreturn [{ json: {\n  success: true,\n  total,\n  with_email: withEmail,\n  email_rate: emailRate + '%',\n  with_phone: withPhone,\n  multi_unit: multiUnit,\n  tiers,\n  email_sources: emailSources,\n  message: `Scraped ${total} leads (${withEmail} with email, ${emailRate}% rate; HOT ${tiers.HOT} / WARM ${tiers.WARM} / COOL ${tiers.COOL}).`,\n} }];\n"
+      },
+      "name": "Summary Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4040,
+        500
+      ]
+    }
+  ],
+  "connections": {
+    "Start": {
+      "main": [
+        [
+          {
+            "node": "Configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuration": {
+      "main": [
+        [
+          {
+            "node": "Generate Search URLs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Search URLs": {
+      "main": [
+        [
+          {
+            "node": "Search Page 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Page 1": {
+      "main": [
+        [
+          {
+            "node": "Extract Page 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Page 1": {
+      "main": [
+        [
+          {
+            "node": "Has Page 2?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Page 2?": {
+      "main": [
+        [
+          {
+            "node": "Wait for Page 2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Quality Filter + Score",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for Page 2": {
+      "main": [
+        [
+          {
+            "node": "Prep Page 2 URLs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prep Page 2 URLs": {
+      "main": [
+        [
+          {
+            "node": "Search Page 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Page 2": {
+      "main": [
+        [
+          {
+            "node": "Merge Pages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Pages": {
+      "main": [
+        [
+          {
+            "node": "Quality Filter + Score",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Quality Filter + Score": {
+      "main": [
+        [
+          {
+            "node": "Get Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Details": {
+      "main": [
+        [
+          {
+            "node": "Combine Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Combine Details": {
+      "main": [
+        [
+          {
+            "node": "Fetch Homepage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Homepage": {
+      "main": [
+        [
+          {
+            "node": "Extract Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Emails": {
+      "main": [
+        [
+          {
+            "node": "Multi-Location + Format",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Multi-Location + Format": {
+      "main": [
+        [
+          {
+            "node": "Save to Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save to Sheet": {
+      "main": [
+        [
+          {
+            "node": "Summary Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
