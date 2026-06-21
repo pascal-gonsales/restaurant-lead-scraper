@@ -68,18 +68,24 @@ detection), and cost-aware API batching.
 
 ## Single source of truth + a drift catcher (the headline engineering point)
 
-The n8n nodes run JavaScript, but every magic number in that JavaScript is
-defined exactly once, in Python, in `workflow-generator.py`. The generator
-builds the node JS by interpolating those constants. The test suite then regexes
-the numbers back out of the generated JS and asserts they equal the Python
-constants.
+The scoring constants the generator emits into JavaScript are defined once, in
+Python, in `workflow-generator.py`. The generator builds the node JS by
+interpolating those constants, and the test suite regexes the numbers back out
+of the generated JS to assert they equal the Python constants.
 
-This structurally eliminates a whole bug class: the "same threshold lives in
-three places, two of them say 8 and one says 7, and nobody notices until leads
-get mis-tiered" failure. If anyone edits a JS literal by hand, CI goes red. The
-drift catcher even checks the hand-built canonical 19-node workflow, so both
-tier ternaries (scoring node and final multi-location node) are pinned to the
-same `TIER_HOT` / `TIER_WARM` constants.
+The drift tests cover a specific, named set, not every literal in the repo:
+
+- In the **generated** workflow: the scoring tier thresholds, the review-volume
+  thresholds, and the chain blacklist are checked against the Python constants.
+- In the **hand-built canonical 19-node workflow**: both tier ternaries (the
+  scoring node and the final multi-location node) are pinned to the same
+  `TIER_HOT` / `TIER_WARM` constants.
+
+This targets the highest-value bug class: a tier or review threshold that lives
+in more than one place silently disagreeing until leads get mis-tiered. It does
+not pin every scoring, filter, or email constant, and it does not assert that
+every canonical JS literal matches Python. Edits outside the covered set
+(for example, the email junk lists or batching intervals) will not turn CI red.
 
 ## How to run
 
@@ -87,7 +93,8 @@ Generate a skeleton workflow per city (standard library only, no install):
 
 ```bash
 python workflow-generator.py
-# OK: Demo City | 9 nodes | ./generated-workflow-demo-city.json
+# OK: Demo City | 9 nodes | <absolute path>/generated-workflow-demo-city.json
+# (the script prints the absolute output path, resolved next to the script)
 ```
 
 Run the tests (pytest is the only dev dependency):
